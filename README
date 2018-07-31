@@ -1,0 +1,51 @@
+# Observatory benchmark utility library
+
+This library does not follow a fixed design philosophy, but
+rather grew out of several attempts to create easily usable
+benchmarking primitives.
+
+The main difference to other benchmarking suites is that it is
+explicitly *not* intended to be a framework, but rather aims to
+provide the tools to extract measurements from existing code.
+
+# Architectural and Design Overview
+
+## Compiler optimizations
+
+Consider this example:
+
+    int foo() {
+        ScopedTimer c(&result);
+
+        int x = 0;
+        for (int i=0; i<10000; ++i) x += i;
+        return x;
+    }
+
+The compiler is free to reorder this to
+
+    int foo() {
+        ScopedTimer c(&result);
+        c.~ScopedTimer();
+
+        int x = 0;
+        for (int i=0; i<10000; ++i) x += i;
+        return x;
+    }
+
+because there is no data dependency between measuring the time point
+and computing the return value. (Actually, in my version of gcc this
+is done quite aggressively as soon as optimizations are turned on, and
+even marking `result` as volatile does not revert it.)
+
+Because this issue is quite subtle to detect and can completely invalidate
+benchmarking results, most time measurements within `observatory` take an
+additional arbitrary parameter on which to generate a data dependency:
+
+    int foo() {
+        ScopedTimer c(&result);
+        int x = 0;
+        for (int i=0; i<10000; ++i) x += i;
+        c.split_after(x);
+        return x;
+    }
