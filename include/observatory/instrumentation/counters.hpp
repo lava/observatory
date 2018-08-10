@@ -33,7 +33,6 @@ std::ostream& operator<<(std::ostream& str, std::chrono::high_resolution_clock::
 namespace internal {
 namespace perf {
 
-
 // Trivial wrapper around perf_event_open() syscall to provide type-checking
 // for args.
 static int
@@ -43,8 +42,7 @@ sys_perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu,
     return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
 }
 
-
-int createHardwareCounter(enum perf_hw_id type)
+static int createHardwareCounter(enum perf_hw_id type)
 {
     struct perf_event_attr pea = {0};
     pea.type = PERF_TYPE_HARDWARE;
@@ -56,6 +54,8 @@ int createHardwareCounter(enum perf_hw_id type)
     //             same kind for the same thread/process?
     // cpu == -1: count on all cpu's
     // group_fd == -1: create counter in a new group
+    //      TODO - the counters for MultiCounter should be created in
+    //             the same group, so they're bound together.
     int fd = sys_perf_event_open(&pea, 0, -1, -1, PERF_FLAG_FD_CLOEXEC);
     if (fd < 0) {
             printf("Error %d: %s\n", errno, strerror(errno));
@@ -71,7 +71,7 @@ int createHardwareCounter(enum perf_hw_id type)
 }
 
 
-uint64_t readCounter(int fd)
+static uint64_t readCounter(int fd)
 {
     uint64_t value = -1;
 
@@ -86,7 +86,7 @@ uint64_t readCounter(int fd)
 #endif // !OBSERVATORY_DISABLE_CPU_COUNTERS
 
 
-namespace benchmark {
+namespace observatory {
 
 struct CpuCounter {
     enum struct Type {
@@ -106,22 +106,22 @@ private:
     uint64_t initial_;
 };
 
-CpuCounter::CpuCounter(Type type)
+inline CpuCounter::CpuCounter(Type type)
   : fd_(internal::perf::createHardwareCounter(static_cast<perf_hw_id>(type)))
   , initial_(internal::perf::readCounter(fd_))
 {}
 
-CpuCounter::~CpuCounter()
+inline CpuCounter::~CpuCounter()
 {
     ::close(fd_);
 }
 
-void CpuCounter::reset()
+inline void CpuCounter::reset()
 {
     initial_ = internal::perf::readCounter(fd_);
 }
 
-uint64_t CpuCounter::split() const
+inline uint64_t CpuCounter::split() const
 {
   uint64_t count = internal::perf::readCounter(fd_);
   return count - initial_;
@@ -141,16 +141,16 @@ private:
     timepoint initial_;
 };
 
-TimeCounter::TimeCounter()
+inline TimeCounter::TimeCounter()
   : initial_(std::chrono::high_resolution_clock::now())
 {}
 
-void TimeCounter::reset()
+inline void TimeCounter::reset()
 {
   initial_ = std::chrono::high_resolution_clock::now();
 }
 
-std::chrono::nanoseconds TimeCounter::split() const
+inline std::chrono::nanoseconds TimeCounter::split() const
 {
   auto now = std::chrono::high_resolution_clock::now();
   return now - initial_;
@@ -177,7 +177,7 @@ private:
 };
 
 
-ScopedSideChannelCollector::ScopedSideChannelCollector(const char* filename, const std::string& annotation)
+inline ScopedSideChannelCollector::ScopedSideChannelCollector(const char* filename, const std::string& annotation)
   : filename_(filename)
 #ifdef __cpp_lib_uncaught_exceptions
   , exceptions_(std::uncaught_exceptions())
@@ -188,7 +188,7 @@ ScopedSideChannelCollector::ScopedSideChannelCollector(const char* filename, con
 {}
 
 
-ScopedSideChannelCollector::~ScopedSideChannelCollector()
+inline ScopedSideChannelCollector::~ScopedSideChannelCollector()
 {
 #ifdef __cpp_lib_uncaught_exceptions
     if (std::uncaught_exceptions() > exceptions_) {
@@ -235,12 +235,12 @@ private:
     CpuCounter instructions_;
 };
 
-MultiCounter::MultiCounter()
+inline MultiCounter::MultiCounter()
   : cycles_(CpuCounter::Type::Cycles)
   , instructions_(CpuCounter::Type::Instructions)
 {}
 
-void MultiCounter::reset()
+inline void MultiCounter::reset()
 {
     // We can't do this atomically, so at least we order it
     // from least to most sensitive.
@@ -265,10 +265,10 @@ MultiCounter::Measurement MultiCounter::split_after(const T& t)
 class PyplotScriptFormatter {
 public:
     static std::ostream& preamble(std::ostream& str);
-    static std::ostream& datapoint(std::ostream& str, const char* tag, int xpos, const MultiCounter::Measurement& m);
+    static std::ostream& datapoint(std::ostream& str, const char* tag, long long int xpos, const MultiCounter::Measurement& m);
 };
 
-std::ostream& PyplotScriptFormatter::preamble(std::ostream& str)
+inline std::ostream& PyplotScriptFormatter::preamble(std::ostream& str)
 {
     return str <<
 R"_(#!/usr/bin/python
@@ -278,6 +278,7 @@ import atexit
 import collections
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 benchmark_data = collections.defaultdict(lambda: collections.defaultdict(list))
 
@@ -286,7 +287,6 @@ benchmark_data = collections.defaultdict(lambda: collections.defaultdict(list))
 def plot(data):
     plot_data = {}
     quantity = "cycles"
-    raw = []
 
     ntags = len(data)
     plot_colors = iter(cm.rainbow(np.linspace(0,1,ntags)))
@@ -295,11 +295,12 @@ def plot(data):
     for tag, data_ in data.iteritems():
         plot_data[tag] = {}
         plot_data[tag]["x"] = []
-        plot_data[tag]["y"] = []
-        plot_data[tag]["yerr"] = []
+        plot_data[tag]["avg"] = []
+        plot_data[tag]["raw"] = []
 
-        for xpos, lst in sorted(data_):#.iteritems():
+        for xpos, lst in sorted(data_.items()):
             pdata = []
+            raw = []
 
             for elem in lst:
                 pdata.append(elem[quantity])
@@ -307,11 +308,10 @@ def plot(data):
 
             # todo - filter outliers
             mean = np.mean(pdata)
-            variance = np.std(pdata)
 
             plot_data[tag]["x"].append(xpos)
-            plot_data[tag]["y"].append(mean)
-            plot_data[tag]["yerr"].append(variance)
+            plot_data[tag]["avg"].append(mean)
+            plot_data[tag]["raw"] += raw
 
     plt.title("Insert title")
     plt.xlabel("Insert x-axis label")
@@ -325,9 +325,9 @@ def plot(data):
 
     for tag, pltdata in plot_data.iteritems():
         # https://matplotlib.org/api/markers_api.html#module-matplotlib.markers
-        plt.scatter(*zip(*raw), marker='x', s=1, c=next(scatter_colors))
-        plt.plot(pltdata["x"], pltdata["y"], ' o', yerr=pltdata["yerr"],
-                 label=tag, color=next(plot_colors))
+        plt.scatter(pltdata["raw"], marker='x', s=1, c=next(scatter_colors))
+        plt.plot(pltdata["x"], pltdata["avg"], ' o', label=tag,
+                 color=next(plot_colors))
 
     plt.legend()
     plt.show()
@@ -341,10 +341,10 @@ atexit.register(lambda: plot(benchmark_data))
 }
 
 
-std::ostream& PyplotScriptFormatter::datapoint(
+inline std::ostream& PyplotScriptFormatter::datapoint(
     std::ostream& str,
     const char* tag,
-    int xpos,
+    long long int xpos,
     const MultiCounter::Measurement& m)
 {
     auto now = std::chrono::system_clock::now();
@@ -370,6 +370,10 @@ public:
     template<typename T>
     void split_after(const T& t);
 
+    // todo - probably `double` would be better for xpos
+    template<typename T>
+    void split_after(const T& t, long long int xpos);
+
 private:
     const char* filename_;
     const char* quantity_;
@@ -382,7 +386,7 @@ private:
 };
 
 
-SideChannelCollector::SideChannelCollector(
+inline SideChannelCollector::SideChannelCollector(
     const char* filename,
     const char* quantity,
     int xpos)
@@ -394,12 +398,13 @@ SideChannelCollector::SideChannelCollector(
 }
 
 
-void SideChannelCollector::reset()
+inline void SideChannelCollector::reset()
 {
     counter_.reset();
     // Attempt to clobber memory to generate a rwbarrier,
     // so initialization cannot be moved too early.
     // (should probably rather go into the individual counters)
+    // todo - verify that this is actually effective.
     asm volatile("" : : : "memory");
 }
 
@@ -407,8 +412,16 @@ void SideChannelCollector::reset()
 template<typename T>
 void SideChannelCollector::split_after(const T& t)
 {
+	this->split_after(t, xpos_);
+}
+
+
+template<typename T>
+void SideChannelCollector::split_after(const T& t, long long int xpos)
+{
     MultiCounter::Measurement m = counter_.split_after(t);
 
+    // todo - would it be useful to add a file i/o mutex?
     std::ofstream file(filename_, std::ios_base::out | std::ios_base::app);
     bool empty = file.tellp() == 0;
 
@@ -416,12 +429,29 @@ void SideChannelCollector::split_after(const T& t)
         Formatter::preamble(file);
     }
 
-    Formatter::datapoint(file, quantity_, xpos_, m);
+    Formatter::datapoint(file, quantity_, xpos, m);
 
     file.close();
 
     this->reset();
 }
 
+inline
+std::ostream& operator<<(std::ostream& str, std::chrono::high_resolution_clock::duration duration)
+{
+    return str << std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1>>>(duration).count();
+}
+
+inline
+std::ostream& operator<<(std::ostream& str, std::chrono::system_clock::time_point time_point)
+{
+    time_t time = std::chrono::system_clock::to_time_t(time_point);
+    // ctime() prints the time in a fixed-width 24-byte long
+    // format string followed by a newline
+    char buffer[26];
+    ctime_r(&time, buffer);
+    buffer[24] = 0; 
+    return str << buffer;
+}
 
 } // namespace observatory
