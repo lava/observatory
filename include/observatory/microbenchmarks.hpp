@@ -9,7 +9,7 @@ struct DataSeries {
     std::vector<double> xpos;
     std::vector<uint64_t> cycles;
     std::vector<uint64_t> instructions;
-    std::vector<std::chrono::high_resolution_clock::duration> walltime;
+    std::vector<std::chrono::steady_clock::duration> walltime;
 
     DataSeries(const std::string& name, size_t intendedSize):
       name(name)
@@ -111,7 +111,7 @@ DataSeries benchmark_series(const std::string& name, BenchmarkFn f, const Benchm
     }
 
     for (int i=0; i<options.repetitions; ++i) {
-        std::chrono::high_resolution_clock::time_point walltime_before, walltime_after;
+        std::chrono::steady_clock::time_point walltime_before, walltime_after;
         uint64_t cycles_before, cycles_after;
         uint64_t instructions_before, instructions_after;
 
@@ -124,7 +124,7 @@ DataSeries benchmark_series(const std::string& name, BenchmarkFn f, const Benchm
 
         // initializing these in order of sensitivity
         if (options.include_walltime) {
-            walltime_before = std::chrono::high_resolution_clock::now();
+            walltime_before = std::chrono::steady_clock::now();
         }
 
         if (options.include_cpu_counters) {
@@ -148,7 +148,7 @@ DataSeries benchmark_series(const std::string& name, BenchmarkFn f, const Benchm
         }
 
         if (options.include_walltime) {
-            walltime_after = std::chrono::high_resolution_clock::now();
+            walltime_after = std::chrono::steady_clock::now();
             result.walltime.push_back(walltime_after - walltime_before);
         }
 
@@ -178,7 +178,7 @@ DataSeries benchmark_series(const std::string& name, BenchmarkFn f, const Benchm
 namespace benchmark {
 
 
-std::ostream& operator<<(std::ostream& str, std::chrono::high_resolution_clock::duration duration)
+std::ostream& operator<<(std::ostream& str, std::chrono::steady_clock::duration duration)
 {
     return str << std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1>>>(duration).count();
 }

@@ -28,7 +28,7 @@
 namespace observatory {
 
 std::ostream& operator<<(std::ostream& str, std::chrono::system_clock::time_point time_point);
-std::ostream& operator<<(std::ostream& str, std::chrono::high_resolution_clock::duration duration);
+std::ostream& operator<<(std::ostream& str, std::chrono::steady_clock::duration duration);
 
 namespace internal {
 namespace perf {
@@ -129,7 +129,7 @@ inline uint64_t CpuCounter::split() const
 
 // todo - templatize on clock type?
 struct TimeCounter {
-    typedef std::chrono::high_resolution_clock::time_point timepoint;
+    typedef std::chrono::steady_clock::time_point timepoint;
 
     TimeCounter();
 
@@ -142,17 +142,17 @@ private:
 };
 
 inline TimeCounter::TimeCounter()
-  : initial_(std::chrono::high_resolution_clock::now())
+  : initial_(std::chrono::steady_clock::now())
 {}
 
 inline void TimeCounter::reset()
 {
-  initial_ = std::chrono::high_resolution_clock::now();
+  initial_ = std::chrono::steady_clock::now();
 }
 
 inline std::chrono::nanoseconds TimeCounter::split() const
 {
-  auto now = std::chrono::high_resolution_clock::now();
+  auto now = std::chrono::steady_clock::now();
   return now - initial_;
 }
 
@@ -223,7 +223,7 @@ public:
     struct Measurement {
         uint64_t instructions;
         uint64_t cycles;
-        std::chrono::high_resolution_clock::duration walltime;
+        std::chrono::steady_clock::duration walltime;
     };
 
     template<typename T>
@@ -437,7 +437,7 @@ void SideChannelCollector::split_after(const T& t, long long int xpos)
 }
 
 inline
-std::ostream& operator<<(std::ostream& str, std::chrono::high_resolution_clock::duration duration)
+std::ostream& operator<<(std::ostream& str, std::chrono::steady_clock::duration duration)
 {
     return str << std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1>>>(duration).count();
 }
