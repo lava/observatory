@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <list>
+#include <mutex>
 
 #include <unistd.h>
 #include <stddef.h>
@@ -520,6 +521,8 @@ public:
     void drain(const char* filename);
 
 private:
+    // TODO - add trailing underscore for most members
+
     // To be forwarded to thread-specific recorders.
     size_t period;
     CounterType type;
@@ -530,6 +533,7 @@ private:
         size_t reserved;
     };
 
+    std::mutex recorders_mutex_; // guards insertion into `recorders`.
     std::map<pid_t, MemoryArea> areas;
     std::map<pid_t, BoundedRecorder> recorders;
 };
@@ -559,7 +563,12 @@ inline void ThreadAwareRecorder::enable()
         area.used = 0;
         area.data = static_cast<char*>(malloc(area.reserved));
     }
-    recorders[tid].enable();
+
+    {
+        std::lock_guard<std::mutex> lock(recorders_mutex_);
+        // todo - Call `enable()` w/o holding the mutex.
+        recorders[tid].enable();
+    }
 }
 
 
@@ -571,7 +580,14 @@ inline void ThreadAwareRecorder::disable()
 
     std::cout << "Disabling recorder for thread " << tid << std::endl;
 
-    auto& recorder = recorders.at(tid);
+    decltype(recorders.begin()) it;
+    {
+        std::lock_guard<std::mutex> lock(recorders_mutex_);
+        // todo - Call `enable()` w/o holding the mutex.
+        it = recorders.find(tid);
+    }
+    // assert: it != recorders.end()
+    auto& recorder = it->second;
     recorder.disable();
     auto& area = areas.at(tid);
     area.used += recorder.extractChunk(

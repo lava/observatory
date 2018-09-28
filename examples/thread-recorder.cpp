@@ -1,7 +1,7 @@
 #include <iostream>
 #include <thread>
 
-#include <observatory/instrumentation/sampling_counters.hpp>
+#include <observatory/instrumentation/perf_sampler.hpp>
 
 
 void untraced_function() {
