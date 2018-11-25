@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <list>
+#include <memory>
 #include <mutex>
 
 #include <unistd.h>
@@ -20,11 +21,21 @@
 
 namespace observatory {
 
+// Non-owning memory view
 struct Chunk {
-    void* data;
+    // Stored as `char*` for pointer arithmetic.
+    char* data;
     size_t size;
 };
 
+// Owning memory view
+struct MemoryArea {
+   // Not using vector to prevent accidental copying.
+   // todo - maybe use vector anyways to avoid pain
+   std::unique_ptr<char[]> data;
+   size_t used;
+   size_t reserved;
+};
 
 class BoundedRecorder;
 class ThreadAwareRecorder;
@@ -147,9 +158,10 @@ inline std::string read_buildid(const char* file)
         }
     }
 
-    if (!note_offset)
+    if (!note_offset) {
         // No need to throw, just print warning and return empty string.
         throw std::runtime_error("no note section found");
+    }
 
     uint32_t note_header[3]; // a tuple (namesz, descsz, type) of 4-byte words
     ifs.seekg(note_offset);
@@ -159,8 +171,9 @@ inline std::string read_buildid(const char* file)
 
     // Default format is 4-byte name "GNU", 20-byte build id and
     // type 3 == NT_GNU_BUILD_ID
-    if (note_header[0] != 4 || note_header[1] != 20 || note_header[2] != 3)
+    if (note_header[0] != 4 || note_header[1] != 20 || note_header[2] != 3) {
        throw std::runtime_error("sorry, can't parse build-id note :/");
+    }
 
     char note[24];
     ifs.read(note, sizeof(note));
@@ -171,7 +184,7 @@ inline std::string read_buildid(const char* file)
 inline void write_perfdata(
     std::ofstream& f,
     const struct perf_event_attr& attr,
-    std::list<Chunk> dataChunks) // FIXME - list is mostly an artifact
+    const std::list<Chunk>& dataChunks) // FIXME - list is mostly an artifact
 {
     pid_t pid = ::getpid();
     // Not sure if setting the correct tid would break things.
@@ -199,7 +212,7 @@ inline void write_perfdata(
     // sections).
     // For the first part, i think it will either listen for the SAMPLE_MMAP
     // events from the kernel, or alternatively read /proc/pid/maps when
-    // attaching to an existing process.
+    // attaching to an existing process. (not completely sure which)
     // We attempt to copy the second approach here, i.e. parsing /proc/pid/maps
     // to synthesize the required data.
 
@@ -271,8 +284,8 @@ inline void write_perfdata(
     }
     ifs.close();
 
-    for (auto chunk : dataChunks) {
-        f.write(static_cast<const char*>(chunk.data), chunk.size);
+    for (const auto& chunk : dataChunks) {
+        f.write(chunk.data, chunk.size);
     }
 
     int final_offset = f.tellp();
@@ -326,8 +339,12 @@ public:
     // Useful for stand-alone use.
     void drain(const char* f);
 
-    // Useful for use within other containers.
-    size_t extractChunk(void* data, size_t maxlen);
+    // Will not allocate, returns number of bytes written.
+    // Can be used while still recording, if desired.
+    size_t siphon(void* data, size_t maxlen);
+
+    // Obviously, subject to change while recorder is still running.
+    size_t size();
 
 private:
     BoundedRecorder(const BoundedRecorder&) = delete;
@@ -344,20 +361,20 @@ private:
         PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TIME | PERF_SAMPLE_IP
         | PERF_SAMPLE_CALLCHAIN | PERF_SAMPLE_TID;
 
-  struct perf_event_attr pea_; // const
+    struct perf_event_attr pea_; // const
 
-  int fd_;
-  // Not sure what exactly the event id represents, but the kernel assigns one
-  // to each fd and perf can read it.
-  int event_id_;
+    int fd_;
+    // Not sure what exactly the event id represents, but the kernel assigns one
+    // to each fd and perf can read it.
+    int event_id_;
 
-  struct perf_event_mmap_page *base_;
-  size_t mmap_size_;
+    struct perf_event_mmap_page *base_;
+    size_t mmap_size_;
 
-  char* ring_base_;
-  uint64_t ring_size_;
-  volatile __u64 *head_;
-  volatile __u64 *tail_;
+    char* ring_base_;
+    uint64_t ring_size_;
+    volatile __u64 *head_;
+    volatile __u64 *tail_;
 };
 
 
@@ -403,7 +420,7 @@ BoundedRecorder::BoundedRecorder(size_t period, CounterType type)
     ioctl(fd_, PERF_EVENT_IOC_ID, &event_id_);
 
     // We basically want to get the buffer as big as possible, but at some
-    // point the kernel just refuses, so just take 512KiB for now.
+    // point the kernel refuses, so take 512KiB for now.
     size_t bytes = 512u * 1024u;
     size_t pgsize = internal::page_size();
     size_t pages = bytes / pgsize;
@@ -475,9 +492,15 @@ inline void BoundedRecorder::drain(const char* f)
     // file.close();
 }
 
+inline size_t BoundedRecorder::size()
+{
+    auto head = *head_, tail = *tail_;
+    return head >= tail
+        ? head - tail
+        : ring_size_ - tail + head;
+}
 
-// Returns true iff more data is available
-inline size_t BoundedRecorder::extractChunk(void* target, size_t maxlen)
+inline size_t BoundedRecorder::siphon(void* target, size_t maxlen)
 {
     size_t copied = 0;
     auto head = *head_, tail = *tail_;
@@ -509,39 +532,46 @@ inline size_t BoundedRecorder::extractChunk(void* target, size_t maxlen)
     return copied + size;
 }
 
+
 // FIXME - document usage and limitations.
 class ThreadAwareRecorder {
 public:
     ThreadAwareRecorder(
+        const std::string& filename,
         size_t period = 5000,
         CounterType = CounterType::Cycles);
 
     void enable();
-    void disable();
-    void drain(const char* filename);
+    //void disable();
+    // If `inject` is non-null, inject the record at the beginning
+    // of the saved record stream.
+    void disable(struct perf_event_header* inject = nullptr);
+    //void dump(const char* filename);
+    void dump();
 
 private:
     // TODO - add trailing underscore for most members
+    void dump_(const char* filename);
+
+    std::string filename_;
 
     // To be forwarded to thread-specific recorders.
     size_t period;
     CounterType type;
 
-    struct MemoryArea {
-        char* data; // Stored as `char*` for pointer arithmetic.
-        size_t used;
-        size_t reserved;
-    };
+    std::mutex recorders_mutex_; // guards insertion into `recorders`
+    std::mutex file_io_mutex_; // guards writes to the file
+    std::list<MemoryArea> io_queue_; // chunks to dump to file
 
-    std::mutex recorders_mutex_; // guards insertion into `recorders`.
-    std::map<pid_t, MemoryArea> areas;
+    //std::map<pid_t, MemoryArea> areas;
     std::map<pid_t, BoundedRecorder> recorders;
 };
 
 
 inline
-ThreadAwareRecorder::ThreadAwareRecorder(size_t period, CounterType type)
-  : period(period)
+ThreadAwareRecorder::ThreadAwareRecorder(const std::string& filename, size_t period, CounterType type)
+  : filename_(filename)
+  , period(period)
   , type(type)
 {
 }
@@ -551,51 +581,80 @@ inline void ThreadAwareRecorder::enable()
 {
     pid_t tid = internal::sys_gettid();
 
-    std::cout << "Enabling recorder for thread " << tid << std::endl;
+    //std::cout << "Enabling recorder for thread " << tid << std::endl;
 
-    // FIXME - add synchronization
-    bool exists = recorders.count(tid);
-
-    if (!exists) {
-        auto& area = areas[tid];
-        // FIXME - dont hardcode size
-        area.reserved = 8*1024*1024;
-        area.used = 0;
-        area.data = static_cast<char*>(malloc(area.reserved));
-    }
-
+    decltype(recorders.begin()) it;
     {
         std::lock_guard<std::mutex> lock(recorders_mutex_);
-        // todo - Call `enable()` w/o holding the mutex.
-        recorders[tid].enable();
+        // todo - Use `try_emplace()` to do this in a single operation,
+        // once C++17 is wide-spread enough.
+        it = recorders.find(tid);
+        if (it == recorders.end()) {
+            recorders[tid];
+            it = recorders.find(tid);
+        }
     }
+
+    it->second.enable();
 }
 
 
-inline void ThreadAwareRecorder::disable()
+inline void ThreadAwareRecorder::disable(struct perf_event_header* inject)
 {
     // FIXME - add synchronization
     // FIXME - check if recorder exists
     pid_t tid = internal::sys_gettid();
 
-    std::cout << "Disabling recorder for thread " << tid << std::endl;
+    //std::cout << "Disabling recorder for thread " << tid << std::endl;
 
     decltype(recorders.begin()) it;
     {
         std::lock_guard<std::mutex> lock(recorders_mutex_);
-        // todo - Call `enable()` w/o holding the mutex.
         it = recorders.find(tid);
     }
+
     // assert: it != recorders.end()
     auto& recorder = it->second;
     recorder.disable();
-    auto& area = areas.at(tid);
-    area.used += recorder.extractChunk(
-        area.data + area.used, area.reserved - area.used);
+
+    size_t size = recorder.size();
+    if (inject) {
+        size += inject->size;
+    }
+
+    // Do the heavy work (i.e. allocating memory and memcopy'ing the event stream)
+    // now so the next `enable()` is fast.
+    MemoryArea area;
+    area.data = std::unique_ptr<char[]>(new char[size]);
+    area.reserved = size;
+    area.used = 0;
+
+    if (inject) {    
+        memcpy(area.data.get(), inject, inject->size);
+        area.used = inject->size;
+    }
+
+    area.used += recorder.siphon(area.data.get() + area.used, recorder.size());
+
+    io_queue_.push_back(std::move(area));
+    //auto& area = areas.at(tid);
+    //area.used += recorder.extractChunk(
+    //    area.data + area.used, area.reserved - area.used);
 }
 
+// todo - do we want the prefix as raw binary data, or just the content
+// around which to wrap 
+/*
+inline void dump_prefixed(const std::string& prefix, const char* filename)
+{
+    std::lock_guard<std::mutex> lock(file_io_mutex_);
+    //std
+}
+*/
 
-inline void ThreadAwareRecorder::drain(const char* filename)
+
+//inline void ThreadAwareRecorder::dump(const char* filename)
+inline void ThreadAwareRecorder::dump()
 {
     if (recorders.empty()) {
         throw std::runtime_error("cannot drain w/o recording");
@@ -608,15 +667,16 @@ inline void ThreadAwareRecorder::drain(const char* filename)
         kv.second.disable();
     }
 
-    std::ofstream f(filename);
+    std::ofstream f(filename_);
 
     // NOTE - We use the same pea for all events, which seems
     // safe right now but will probably break at some point.
+  
     std::list<Chunk> chunks;
-    for (auto kv : areas) {
-        chunks.push_back(Chunk {kv.second.data, kv.second.used});
-        std::cout << kv.second.data << " for " << kv.second.used << " bytes\n";
+    for (const MemoryArea& area : io_queue_) {
+        chunks.push_back(Chunk {area.data.get(), area.used});
     }
+   
     internal::write_perfdata(f, recorders.begin()->second.pea_, chunks);
 }
 

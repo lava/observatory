@@ -1,8 +1,7 @@
-#include <iostream>
-#include <thread>
-
 #include <observatory/instrumentation/perf_sampler.hpp>
 
+#include <iostream>
+#include <thread>
 
 void untraced_function() {
 	unsigned long x = 0;
@@ -21,7 +20,7 @@ void traced_function() {
 }
 
 int main() {
-	observatory::ThreadAwareRecorder tr(100, observatory::CounterType::Cycles);
+	observatory::ThreadAwareRecorder tr("perf.data", 100, observatory::CounterType::Cycles);
 
         // Traces for this shouldn't show up in the perf.data
         std::thread t0([&tr] {
@@ -38,5 +37,5 @@ int main() {
 	t0.join();
 	t1.join();
 
-	tr.drain("perf.data");
+	tr.dump();
 }
