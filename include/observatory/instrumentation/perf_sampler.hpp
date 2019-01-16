@@ -92,7 +92,7 @@ struct perf_buildid_event {
     // The build id inserted by gcc (and printed by `perf buildid-list`) is
     // only 20 byte, not sure how it can tell the end.
     uint8_t build_id[24];
-    // char filename[];
+    char filename[];
 } __attribute__((packed));
 
 struct perf_mmap_event {
@@ -101,8 +101,16 @@ struct perf_mmap_event {
     uint64_t addr;
     uint64_t len;
     uint64_t pgoff;
-    // char filename[];
+    char filename[];
 } __attribute__((packed));
+
+struct perf_comm_event {
+  struct perf_event_header header;
+  uint32_t pid, tid;
+  char comm[];
+  // struct sample_id sample_id;
+} __attribute__((packed));
+
 
 constexpr int PERF_RECORD_HEADER_BUILD_ID = 67;
 
@@ -233,6 +241,7 @@ inline void write_perfdata(
         char segments[128];
         char long_name[256];
         char r, w, x, p, newline;
+        // 557055ce1000-557055ce9000 r-xp 00000000 fd:00 3145795      /bin/cat
         int items = sscanf(line.c_str(),
             "%lx-%lx %c%c%c%c %lx %s %lu%256[^\n]%c",
             &start, &end, &r, &w, &x, &p, &offset,
@@ -356,7 +365,6 @@ private:
     // samples. (since a counter can track multiple processes)
     // Theoretically IP is included in CALLCHAIN, but `perf script` complains
     // if it doesn't get the ip as a separate field.
-    // TODO(bevers): Figure out if STREAM_ID is necessary, and what it does.
     static const uint64_t SAMPLE_TYPE =
         PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TIME | PERF_SAMPLE_IP
         | PERF_SAMPLE_CALLCHAIN | PERF_SAMPLE_TID;
@@ -542,10 +550,20 @@ public:
         CounterType = CounterType::Cycles);
 
     void enable();
-    //void disable();
-    // If `inject` is non-null, inject the record at the beginning
-    // of the saved record stream.
-    void disable(struct perf_event_header* inject = nullptr);
+
+    // If `prefix`/`suffix` is non-null, inject the record at the
+    // beginning/end of the saved record stream.
+    void disable(
+        struct perf_event_header* prefix = nullptr,
+        struct perf_event_header* suffix = nullptr);
+
+    // A "user-friendly" wrapper for the common case of the above:
+    // Injects an artificial "thread rename" event at the beginning
+    // of the current recording.
+    // TODO - it would often be more natural to pass the string to
+    // pass the string to `enable()`.
+    void disable(const std::string& comm);
+
     //void dump(const char* filename);
     void dump();
 
@@ -599,7 +617,11 @@ inline void ThreadAwareRecorder::enable()
 }
 
 
-inline void ThreadAwareRecorder::disable(struct perf_event_header* inject)
+// Todo - think about allowing arbitrary binary
+// data, or at least `std::vector<perf_event_header>`
+inline void ThreadAwareRecorder::disable(
+    struct perf_event_header* prefix,
+    struct perf_event_header* suffix)
 {
     // FIXME - add synchronization
     // FIXME - check if recorder exists
@@ -618,40 +640,50 @@ inline void ThreadAwareRecorder::disable(struct perf_event_header* inject)
     recorder.disable();
 
     size_t size = recorder.size();
-    if (inject) {
-        size += inject->size;
-    }
+    size += prefix ? prefix->size : 0;
+    size += suffix ? suffix->size : 0;
 
-    // Do the heavy work (i.e. allocating memory and memcopy'ing the event stream)
+    // Do the heavy work (i.e. allocating memory and memcopying the event stream)
     // now so the next `enable()` is fast.
     MemoryArea area;
     area.data = std::unique_ptr<char[]>(new char[size]);
     area.reserved = size;
     area.used = 0;
 
-    if (inject) {    
-        memcpy(area.data.get(), inject, inject->size);
-        area.used = inject->size;
+    if (prefix) {
+        memcpy(area.data.get(), prefix, prefix->size);
+        area.used = prefix->size;
     }
 
     area.used += recorder.siphon(area.data.get() + area.used, recorder.size());
 
+    if (suffix) {
+        memcpy(area.data.get() + area.used, suffix, suffix->size);
+        area.used += suffix->size;
+    }
+
     io_queue_.push_back(std::move(area));
-    //auto& area = areas.at(tid);
-    //area.used += recorder.extractChunk(
-    //    area.data + area.used, area.reserved - area.used);
 }
 
-// todo - do we want the prefix as raw binary data, or just the content
-// around which to wrap 
-/*
-inline void dump_prefixed(const std::string& prefix, const char* filename)
+inline void ThreadAwareRecorder::disable(const std::string& comm)
 {
-    std::lock_guard<std::mutex> lock(file_io_mutex_);
-    //std
-}
-*/
+    using internal::perf_comm_event;
 
+    auto pid = syscall(__NR_getpid);
+    auto tid = syscall(__NR_gettid);
+
+    struct perf_comm_event *prefix = static_cast<struct perf_comm_event*>(::malloc(sizeof(struct perf_comm_event) + 64));
+    prefix->header.size = sizeof(struct perf_comm_event) + comm.size() + 1;
+    prefix->header.type = PERF_RECORD_COMM;
+    prefix->header.misc = 0;
+    prefix->pid = pid;
+    prefix->tid = tid;
+    strcpy(&prefix->comm[0], comm.c_str());
+
+    this->disable(&prefix->header);
+
+    ::free(prefix);
+}
 
 //inline void ThreadAwareRecorder::dump(const char* filename)
 inline void ThreadAwareRecorder::dump()
