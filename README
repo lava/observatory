@@ -1,18 +1,27 @@
 # Observatory benchmark utility library
 
-This library does not follow a fixed design philosophy, but
-rather grew out of several attempts to create easily usable
-benchmarking primitives.
+This library contains various tools for observing the runtime
+behaviour of a program, in particular related to performance.
 
-The main difference to other benchmarking suites is that it is
-explicitly *not* intended to be a framework, but rather aims to
-provide the tools to extract measurements from existing code.
+It is explicitly *not* intended to be a framework. That means
+unlike gbenchmark, etc., the user should not be expected to
+set up test benches in order to use this library.
 
-# Architectural and Design Overview
+Currently, three utilities have been implemented:
 
-[TODO]
+ 1) [Perf counters](include/observatory/counters.hpp) 
 
-# Misc
+ 2) [Pyplot Sink](include/observatory/pyplot_sink.hpp) 
+
+ 3) [Perf samplers](include/observatory/perf_sampler.hpp)
+
+
+While these should work fine, this library is still pretty
+far from being polished or battle-tested, so please don't
+expect things to just work out of the box.
+
+
+# Design Notes
 
 ## Compiler optimizations
 

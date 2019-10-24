@@ -1,3 +1,7 @@
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+
 // Various side-channels in which to dump data.
 // Usually each sink will also define its own transport
 // format. Due to this, they might have different restrictions
@@ -13,10 +17,6 @@
 //   MemorySink
 //   InteractiveSink
 //   ...
-
-#include <chrono>
-#include <fstream>
-#include <iomanip>
 
 
 namespace observatory {
