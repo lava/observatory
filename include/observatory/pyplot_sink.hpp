@@ -2,21 +2,15 @@
 #include <fstream>
 #include <iomanip>
 
-// Various side-channels in which to dump data.
-// Usually each sink will also define its own transport
-// format. Due to this, they might have different restrictions
-// on what kind of data they can accept and how it is structured,
-// so there's unlikely to be a general "sink" interface.
+// The `PyplotSink` is a class that accepts data points and
+// generates a python script plotting the data. 
 //
-// Currently implemented:
-//   PyplotSink
+// A data point for this class is defined as a `x` and `y`
+// coordinate, together with a `tag` identifying the data
+// series.
 //
-// Future ideas:
-//   CsvSink
-//   NetworkSink
-//   MemorySink
-//   InteractiveSink
-//   ...
+// The output file is persistent, so data can be appended
+// throughout multiple runs of the same program.
 
 
 namespace observatory {
@@ -45,11 +39,13 @@ private:
 };
 
 
+inline
 PyplotSink::PyplotSink(const std::string& filename)
   : output_(PyplotSink::prepareFile_(filename))
 {}
 
 
+inline
 void PyplotSink::datapoint(const std::string& tag, long long x, double y, const char* note)
 {
     this->datapoint_(output_, tag, x, y, note);

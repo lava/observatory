@@ -19,6 +19,25 @@
 
 #include <linux/perf_event.h>
 
+
+// This file defines two classes to capture perf stack
+// traces, `BoundedRecorder` and `ThreadAwareRecorder`.
+//
+// The `BoundedRecorder` is capturing perf samples for the
+// thread in which the recorder was constructed, into an
+// internal buffer of bounded size. The user regularly needs
+// to call `BoundedRecorder::siphon()` to drain the data into
+// external storage.
+//
+// The `ThreadAwareRecorder` works similar to the above,
+// but will automatically create a new `BoundedRecorder`
+// the first time it is activated in the current thread.
+//
+// The main advantage of using these classes as opposed to
+// running `perf record` is that the recording can be turned
+// on and off at runtime, which is not possible using
+// the `perf` tool.
+
 namespace observatory {
 
 // Non-owning memory view

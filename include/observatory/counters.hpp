@@ -1,12 +1,4 @@
-// This header includes methods that can be injected into
-// code to easily collect measurements from existing codebases
-// (or even running processes later)
-// 
-// It should stay header-only and as dependency-free as reasonably
-// possible.
-
 #pragma once
-
 
 #include <chrono>
 #include <functional>
@@ -15,6 +7,24 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// This header defines utility classes to get measurements
+// from hardware performance counters.
+//
+// The `CpuCounter` can be used to count either instructions
+// or clock cycles between calls to `CpuCounter::split()`. The
+// `TimeCounter` provides the same API for clock time.
+// [todo: is this a deprecated api?]
+//
+// The `MultiCounter` includes two cpu counters and a time counter
+// to provide all three measurements at the same time.
+//
+// The `SideChannelCollector` and `ScopedSideChannelColleector`
+// include a multi counter and append the measurement results
+// to a file on the filesystem.
+//
+// The `PyplotScriptFormatter` is a predecessor of the `PyplotSink`
+// and really should be moved into a separate file.
 
 #ifndef OBSERVATORY_DISABLE_CPU_COUNTERS
 
