@@ -9,16 +9,16 @@ set up test benches in order to use this library.
 
 Currently, three utilities have been implemented:
 
- 1) [Perf counters](include/observatory/counters.hpp) 
+ 1) [Perf Counters](include/observatory/counters.hpp) 
 
  2) [Pyplot Sink](include/observatory/pyplot_sink.hpp) 
 
- 3) [Perf samplers](include/observatory/perf_sampler.hpp)
+ 3) [Perf Samplers](include/observatory/perf_sampler.hpp)
 
 
-While these should work fine, this library is still pretty
-far from being polished or battle-tested, so please don't
-expect things to just work out of the box.
+While these should work fine, the library was pretty much
+salvaged from a bunch of ad-hoc performance experiments
+and thus the level of polish is relatively low.
 
 
 # Design Notes
