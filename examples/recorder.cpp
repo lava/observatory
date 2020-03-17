@@ -1,5 +1,5 @@
 #include <iostream>
-#include <observatory/instrumentation/perf_sampler.hpp>
+#include <observatory/perf_sampler.hpp>
 
 int foo() {
     for (int i=0; i<64; ++i) {

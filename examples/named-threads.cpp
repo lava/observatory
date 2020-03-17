@@ -1,4 +1,4 @@
-#include <observatory/instrumentation/perf_sampler.hpp>
+#include <observatory/perf_sampler.hpp>
 
 #include <sys/syscall.h>
 #include <iostream>

@@ -1,4 +1,4 @@
-#include <observatory/instrumentation/pyplot_sink.hpp>
+#include <observatory/pyplot_sink.hpp>
 
 int main() {
     observatory::PyplotSink::datapoint("test.py", "series1", 1, 4.0, "hello!");
