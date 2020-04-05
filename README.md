@@ -11,7 +11,8 @@ Currently, three utilities have been implemented:
 
  1) [Perf Counters](include/observatory/counters.hpp) 
 
- 2) [Pyplot Sink](include/observatory/pyplot_sink.hpp) 
+ 2) [Pyplot Sink](include/observatory/pyplot_sink.hpp)
+    and [GGplot Sink](include/observatory/ggplot_sink.hpp)
 
  3) [Perf Samplers](include/observatory/perf_sampler.hpp)
 
@@ -47,9 +48,11 @@ The compiler is free to reorder this to
     }
 
 because there is no data dependency between measuring the time point
-and computing the return value. (Actually, in my version of gcc this
+and computing the return value. In my version of gcc this
 is done quite aggressively as soon as optimizations are turned on, and
-even marking `result` as volatile does not revert it.)
+even marking `result` as volatile does not revert it.
+(Update April 2020: On my current version of gcc I have difficulties
+generating this effect at all, which probably kinda proves the point)
 
 Because this issue is quite subtle to detect and can completely invalidate
 benchmarking results, most time measurements within `observatory` take an
